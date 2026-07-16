@@ -8,6 +8,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=EB+Garamond:ital,wght@0,400;0,500;1,400&family=Special+Elite&display=swap" rel="stylesheet">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/tone/14.8.49/Tone.js"></script>
 <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/12.15.0/firebase-app-compat.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/firebase/12.15.0/firebase-firestore-compat.min.js"></script>
 <style>
   :root{
     --ink-black:#18120d;
@@ -429,6 +431,30 @@
   // ---------------- CONFIG ----------------
   var ADMIN_PASSWORD = "ENOLA1889"; // change this to whatever you like
 
+  // Paste your own Firebase project's config here (see setup instructions).
+  // Storage will not work on GitHub Pages until this is filled in.
+  var firebaseConfig = {
+    apiKey: "AIzaSyCAgm0xcKEGZCBcdjTnWqZJr6spUNoT43A",
+    authDomain: "enola-letter.firebaseapp.com",
+    projectId: "enola-letter",
+    storageBucket: "enola-letter.firebasestorage.app",
+    messagingSenderId: "576465169226",
+    appId: "1:576465169226:web:d253fdf1e621676543efb3"
+  };
+
+  var db = null;
+  var firebaseReady = false;
+  try{
+    if (firebaseConfig.apiKey && firebaseConfig.apiKey !== "YOUR_API_KEY" && typeof firebase !== 'undefined'){
+      firebase.initializeApp(firebaseConfig);
+      db = firebase.firestore();
+      firebaseReady = true;
+    }
+  }catch(e){
+    console.error('Firebase init failed:', e);
+    firebaseReady = false;
+  }
+
   // ---------------- VIEW ELEMENTS ----------------
   var writerView = document.getElementById('writerView');
   var confirmView = document.getElementById('confirmView');
@@ -587,40 +613,28 @@
   document.getElementById('musicToggleBtn').addEventListener('click', toggleMusic);
 
   // ---------------- STORAGE HELPERS ----------------
+  var storageAvailable = firebaseReady;
+
   function genId(){
     return Date.now().toString(36) + '-' + Math.random().toString(36).slice(2,8);
   }
 
   async function saveLetter(letter){
-    var key = 'letters:' + letter.id;
-    return await window.storage.set(key, JSON.stringify(letter), true);
+    await db.collection('letters').doc(letter.id).set(letter);
+    return true;
   }
 
   async function fetchAllLetters(){
-    var listResult = await window.storage.list('letters:', true);
-    if (!listResult || !listResult.keys || listResult.keys.length === 0) return [];
+    var snapshot = await db.collection('letters').orderBy('createdAt', 'desc').get();
     var letters = [];
-    for (var i=0; i<listResult.keys.length; i++){
-      try{
-        var res = await window.storage.get(listResult.keys[i], true);
-        if (res && res.value){
-          letters.push(JSON.parse(res.value));
-        }
-      }catch(e){ /* skip unreadable entry */ }
-    }
-    letters.sort(function(a,b){ return b.createdAt - a.createdAt; });
+    snapshot.forEach(function(doc){ letters.push(doc.data()); });
     return letters;
   }
 
   async function markDelivered(id){
-    var key = 'letters:' + id;
     try{
-      var res = await window.storage.get(key, true);
-      if (!res) return;
-      var letter = JSON.parse(res.value);
-      letter.status = 'delivered';
-      await window.storage.set(key, JSON.stringify(letter), true);
-    }catch(e){}
+      await db.collection('letters').doc(id).update({ status: 'delivered' });
+    }catch(e){ console.error('Mark delivered failed:', e); }
   }
 
   // ---------------- WRITER VIEW LOGIC ----------------
@@ -663,6 +677,11 @@
       return;
     }
 
+    if (!storageAvailable){
+      formError.textContent = 'Letters cannot be sealed yet — the site\'s storage hasn\'t been set up. (If this is your site: paste your Firebase config into the firebaseConfig object in the HTML file.)';
+      return;
+    }
+
     sendBtn.disabled = true;
     formError.textContent = '';
 
@@ -678,7 +697,7 @@
     try{
       var result = await saveLetter(letter);
       if (!result){
-        formError.textContent = 'Something went wrong sealing your letter. Please try again.';
+        formError.textContent = 'The letter could not be saved — please try sealing it again.';
         sendBtn.disabled = false;
         return;
       }
@@ -686,7 +705,8 @@
       showView(confirmView);
       resetForm();
     }catch(e){
-      formError.textContent = 'Something went wrong sealing your letter. Please try again.';
+      console.error('Save letter failed:', e);
+      formError.textContent = 'Something went wrong sealing your letter: ' + (e && e.message ? e.message : 'please try again.');
     }
     sendBtn.disabled = false;
   });
@@ -840,12 +860,17 @@
 
   async function openAdminDashboard(){
     showView(adminDashView);
+    if (!storageAvailable){
+      lettersList.innerHTML = '<div class="empty-state">The dispatch box isn\'t connected yet — storage hasn\'t been set up. Paste your Firebase config into the firebaseConfig object in the HTML file.</div>';
+      return;
+    }
     lettersList.innerHTML = '<div class="loading-state">Retrieving the dispatch box…</div>';
     try{
       var letters = await fetchAllLetters();
       renderLetters(letters);
     }catch(e){
-      lettersList.innerHTML = '<div class="empty-state">Could not open the dispatch box. Please try again.</div>';
+      console.error('Fetch letters failed:', e);
+      lettersList.innerHTML = '<div class="empty-state">Could not open the dispatch box: ' + (e && e.message ? e.message : 'please try again.') + '</div>';
     }
   }
 
