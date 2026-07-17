@@ -418,6 +418,9 @@
 </head>
 <body>
 <div id="app">
+<audio id="bgMusic" loop preload="auto">
+  <source src="pahintulot-instrumental.mp3" type="audio/mpeg">
+</audio>
 
   <div class="topbar">
     <button class="topbar-btn" id="adminToggleBtn" title="Admin case file" aria-label="Open admin case file">
@@ -567,36 +570,17 @@
     v.classList.remove('hidden');
   }
 
-  // ---------------- SOUND (Tone.js) ----------------
+  // ---------------- SOUND (Tone.js for effects, real audio for music) ----------------
   var toneLoadFailed = (typeof Tone === 'undefined');
   var audioReady = false;
   var musicPlaying = false;
-  var padSynth = null;
-  var pluckSynth = null;
   var typeNoise = null;
   var lastTypeSound = 0;
-  var musicIntervalId = null;
-  var musicTick = 0;
-  var chordIdx = 0;
-  var melodyIdx = 0;
-
-  var padChords = [
-    ["D3","F3","A3"], ["Bb2","D3","F3"], ["G2","Bb2","D3"], ["A2","C3","E3"]
-  ];
-  var melodyNotes = ["D4","F4","A4","G4","F4","E4","D4",null,"A3","C4","D4",null];
+  var bgMusic = document.getElementById('bgMusic');
+  bgMusic.volume = 0.45;
 
   function buildAudioGraph(){
     if (audioReady || toneLoadFailed) return;
-    padSynth = new Tone.PolySynth(Tone.Synth, {
-      oscillator:{ type:"sine" },
-      envelope:{ attack:1.0, decay:0.6, sustain:0.4, release:2.2 },
-      volume:-13
-    }).toDestination();
-
-    pluckSynth = new Tone.PluckSynth({
-      attackNoise:0.6, dampening:3200, resonance:0.85, volume:-8
-    }).toDestination();
-
     typeNoise = new Tone.NoiseSynth({
       noise:{ type:"white" },
       envelope:{ attack:0.001, decay:0.03, sustain:0 },
@@ -653,59 +637,23 @@
     }catch(e){}
   }
 
-  function musicStep(){
-    try{
-      if (musicTick % 2 === 0){
-        var note = melodyNotes[melodyIdx % melodyNotes.length];
-        if (note) pluckSynth.triggerAttack(note);
-        melodyIdx++;
-      }
-      if (musicTick % 8 === 0){
-        padSynth.triggerAttackRelease(padChords[chordIdx % padChords.length], "2n");
-        chordIdx++;
-      }
-    }catch(e){ console.error('Music step failed:', e); }
-    musicTick++;
-  }
-
-  function startMusicLoop(){
-    if (musicIntervalId) return;
-    var bpm = 62;
-    var beatMs = 60000 / bpm;
-    musicTick = 0;
-    musicStep(); // play immediately so the user hears something right away
-    musicIntervalId = setInterval(musicStep, beatMs);
-  }
-
-  function stopMusicLoop(){
-    if (musicIntervalId){
-      clearInterval(musicIntervalId);
-      musicIntervalId = null;
-    }
-  }
-
   async function toggleMusic(){
     var btn = document.getElementById('musicToggleBtn');
 
-    if (toneLoadFailed){
-      alert("The music library couldn't load, likely due to a network or connection issue. Please check your connection and reload the page.");
-      return;
-    }
-
-    var ok = await ensureAudio();
-    if (!ok){
-      alert("Your browser blocked audio from starting. Try clicking the music button again.");
-      return;
-    }
-
     if (musicPlaying){
-      stopMusicLoop();
+      bgMusic.pause();
       musicPlaying = false;
       btn.classList.remove('active');
-    } else {
-      startMusicLoop();
+      return;
+    }
+
+    try{
+      await bgMusic.play();
       musicPlaying = true;
       btn.classList.add('active');
+    }catch(e){
+      console.error('Music play failed:', e);
+      alert("Your browser blocked audio from starting. Try clicking the music button again.");
     }
   }
 
@@ -1200,13 +1148,11 @@
     if (e && e.target && e.target.closest && e.target.closest('#musicToggleBtn')) return;
     autoMusicStarted = true;
     removeAutoMusicListeners();
-    ensureAudio().then(function(ok){
-      if (ok && !musicPlaying){
-        startMusicLoop();
-        musicPlaying = true;
-        document.getElementById('musicToggleBtn').classList.add('active');
-      }
-    });
+    ensureAudio();
+    bgMusic.play().then(function(){
+      musicPlaying = true;
+      document.getElementById('musicToggleBtn').classList.add('active');
+    }).catch(function(e){ console.error('Autoplay blocked:', e); });
   }
   var autoMusicEvents = ['pointerdown','keydown','touchstart'];
   function removeAutoMusicListeners(){
